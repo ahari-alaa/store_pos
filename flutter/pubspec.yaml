@@ -1,0 +1,71 @@
+name: store_pos
+description: Professional Store POS & Management System (Flutter + Riverpod + Supabase-ready).
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Bilingual FR/AR support incl. Arabic RTL — ships with the Flutter SDK
+  # itself (no pub.dev resolution needed), see core/l10n/.
+  flutter_localizations:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.5.1
+
+  # Routing
+  go_router: ^14.2.0
+
+  # Typography
+  google_fonts: ^6.2.1
+
+  # Formatting (currency, dates)
+  # Pinned by flutter_localizations (added for FR/AR support) — see
+  # https://dart.dev/go/sdk-version-pinning.
+  intl: ^0.20.2
+
+  cupertino_icons: ^1.0.8
+
+  # Networking (talks to the store_pos_backend Node/Express API)
+  http: ^1.2.2
+
+  # Secure on-device storage for the JWT access/refresh tokens
+  flutter_secure_storage: ^9.2.2
+
+  # Client-generated UUIDs for sale/payment idempotency keys
+  # (client_operation_id), matching the backend's offline-sync design.
+  uuid: ^4.4.2
+
+  # Receipt printing: renders a PDF receipt and hands it to the OS print
+  # dialog / "Save as PDF" — works with any regular printer, no special
+  # thermal/ESC-POS hardware required.
+  pdf: ^3.11.1
+  printing: ^5.13.3
+
+  # Product photos: cross-platform (incl. desktop) file picker for
+  # choosing an image, and MIME-type tagging for the multipart upload to
+  # POST /products/:id/image (see products_api.dart#uploadImage).
+  file_picker: ^8.1.2
+  http_parser: ^4.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+# NOTE (Phase 1 scope):
+# - No SQLite / barcode packages yet, per the phased plan.
+# - SQLite/offline sync will be added in Phase 8 (sqflite / drift); ESC/POS
+#   thermal-printer support (if ever needed) would be a separate addition —
+#   receipts currently print via the OS print dialog (`printing` + `pdf`),
+#   which works with any regular printer.
+# - This app now talks to the Node/Express `store_pos_backend` API (see
+#   lib/core/config/api_config.dart) instead of Supabase directly.
