@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:printing/printing.dart';
 
 import '../../../../core/design/design_system.dart';
 import '../../../../core/l10n/locale_provider.dart';
@@ -14,6 +13,7 @@ import '../providers/cart_provider.dart';
 import '../providers/payment_provider.dart';
 import '../providers/receipt_data.dart';
 import '../providers/sale_provider.dart';
+import '../utils/receipt_printer_service.dart';
 import '../utils/receipt_pdf.dart';
 import 'cart_item_tile.dart';
 import 'payment_section.dart';
@@ -193,6 +193,16 @@ class CartPanel extends ConsumerWidget {
         change: change,
       );
 
+      final printerSettings = ref.read(receiptSettingsProvider);
+      if (printerSettings.autoPrintEnabled) {
+        await _sendToConfiguredPrinter(
+          context,
+          ref,
+          receipt: receipt,
+          showSuccess: false,
+        );
+      }
+
       if (!context.mounted) return;
       await showDialog(
         context: context,
@@ -318,29 +328,42 @@ class CartPanel extends ConsumerWidget {
     }
   }
 
-  /// Sends the current cart straight to the OS print dialog, using the
-  /// receipt settings configured in Settings → Receipt & Printer. Since
-  /// this runs before any payment is taken, the printed receipt is marked
-  /// NOT PAID (use "Pay" first, then the post-sale receipt dialog, to
-  /// print a paid receipt).
+  /// Sends the current cart receipt to the configured printer using the
+  /// receipt settings from Settings → Receipt & Printer. Since this runs
+  /// before any payment is taken, the printed receipt is marked NOT PAID
+  /// (use "Pay" first, then print the paid receipt).
   Future<void> _printReceipt(BuildContext context, WidgetRef ref) async {
     final receipt = _buildUnpaidReceipt(context, ref);
     if (receipt == null) return;
+    await _sendToConfiguredPrinter(context, ref, receipt: receipt, showSuccess: true);
+  }
+
+  Future<void> _sendToConfiguredPrinter(
+    BuildContext context,
+    WidgetRef ref, {
+    required ReceiptData receipt,
+    required bool showSuccess,
+  }) async {
     try {
       final settings = ref.read(receiptSettingsProvider);
       final bytes = await (await buildReceiptPdf(receipt, settings)).save();
-      final printed = await Printing.layoutPdf(
-        onLayout: (format) async => bytes,
-        name: 'receipt-${receipt.receiptNumber}',
+      final printer = ref.read(receiptPrinterServiceProvider);
+      await printer.printReceiptPdf(
+        bytes: bytes,
+        settings: settings,
+        jobName: 'receipt-${receipt.receiptNumber}',
       );
       if (!context.mounted) return;
-      if (printed) {
+      if (showSuccess) {
         showAppToast(
           context,
           message: trRead(ref, 'pos.print_sent'),
           kind: AppToastKind.success,
         );
       }
+    } on ReceiptPrintException catch (e) {
+      if (!context.mounted) return;
+      showAppToast(context, message: e.message, kind: AppToastKind.error);
     } catch (_) {
       if (!context.mounted) return;
       showAppToast(

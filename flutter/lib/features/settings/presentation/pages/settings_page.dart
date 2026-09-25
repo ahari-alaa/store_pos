@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 
 import '../../../../core/l10n/app_locale.dart';
 import '../../../../core/l10n/locale_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../core/theme/theme_provider.dart';
+import '../../../pos/domain/entities/cart_item.dart';
+import '../../../pos/domain/entities/payment_method.dart';
+import '../../../pos/domain/entities/product.dart';
+import '../../../pos/presentation/providers/payment_provider.dart';
+import '../../../pos/presentation/providers/receipt_data.dart';
+import '../../../pos/presentation/utils/receipt_pdf.dart';
+import '../../../pos/presentation/utils/receipt_printer_service.dart';
 import '../../domain/entities/receipt_settings.dart';
 import '../providers/receipt_settings_provider.dart';
 
@@ -54,6 +62,8 @@ class _ReceiptPrinterSettingsCard extends ConsumerStatefulWidget {
 
 class _ReceiptPrinterSettingsCardState extends ConsumerState<_ReceiptPrinterSettingsCard> {
   late final TextEditingController _printerName;
+  late final TextEditingController _printerIdentifier;
+  late final TextEditingController _receiptCopies;
   late final TextEditingController _storeName;
   late final TextEditingController _storeAddress;
   late final TextEditingController _storePhone;
@@ -72,6 +82,8 @@ class _ReceiptPrinterSettingsCardState extends ConsumerState<_ReceiptPrinterSett
     super.initState();
     final settings = ref.read(receiptSettingsProvider);
     _printerName = TextEditingController(text: settings.printerName);
+    _printerIdentifier = TextEditingController(text: settings.printerIdentifier);
+    _receiptCopies = TextEditingController(text: settings.receiptCopies.toString());
     _storeName = TextEditingController(text: settings.storeName);
     _storeAddress = TextEditingController(text: settings.storeAddress);
     _storePhone = TextEditingController(text: settings.storePhone);
@@ -82,6 +94,8 @@ class _ReceiptPrinterSettingsCardState extends ConsumerState<_ReceiptPrinterSett
   @override
   void dispose() {
     _printerName.dispose();
+    _printerIdentifier.dispose();
+    _receiptCopies.dispose();
     _storeName.dispose();
     _storeAddress.dispose();
     _storePhone.dispose();
@@ -101,6 +115,8 @@ class _ReceiptPrinterSettingsCardState extends ConsumerState<_ReceiptPrinterSett
     // current text-field values into settings just in case, then confirms.
     _updateSettings((s) => s.copyWith(
           printerName: _printerName.text.trim(),
+          printerIdentifier: _printerIdentifier.text.trim(),
+          receiptCopies: _readCopiesOrDefault(_receiptCopies.text),
           storeName: _storeName.text.trim().isEmpty ? s.storeName : _storeName.text.trim(),
           storeAddress: _storeAddress.text.trim(),
           storePhone: _storePhone.text.trim(),
@@ -121,6 +137,8 @@ class _ReceiptPrinterSettingsCardState extends ConsumerState<_ReceiptPrinterSett
     final defaults = ReceiptSettings.defaults;
     setState(() {
       _printerName.text = defaults.printerName;
+      _printerIdentifier.text = defaults.printerIdentifier;
+      _receiptCopies.text = defaults.receiptCopies.toString();
       _storeName.text = defaults.storeName;
       _storeAddress.text = defaults.storeAddress;
       _storePhone.text = defaults.storePhone;
@@ -143,6 +161,8 @@ class _ReceiptPrinterSettingsCardState extends ConsumerState<_ReceiptPrinterSett
       if (!notifier.isLoaded) return;
       _syncedFromStorage = true;
       _printerName.text = next.printerName;
+      _printerIdentifier.text = next.printerIdentifier;
+      _receiptCopies.text = next.receiptCopies.toString();
       _storeName.text = next.storeName;
       _storeAddress.text = next.storeAddress;
       _storePhone.text = next.storePhone;
@@ -180,15 +200,59 @@ class _ReceiptPrinterSettingsCardState extends ConsumerState<_ReceiptPrinterSett
           const SizedBox(height: 8),
           _LabeledField(
             controller: _printerName,
-            label: 'Printer',
+            label: 'Printer name',
             hint: 'e.g. Front counter printer',
             onChanged: (v) => _updateSettings((s) => s.copyWith(printerName: v)),
           ),
+          const SizedBox(height: 10),
+          SegmentedButton<ReceiptPrinterConnectionType>(
+            segments: ReceiptPrinterConnectionType.values
+                .map((type) => ButtonSegment(value: type, label: Text(type.label)))
+                .toList(),
+            selected: {settings.connectionType},
+            onSelectionChanged: (selection) {
+              _updateSettings((s) => s.copyWith(connectionType: selection.first));
+            },
+          ),
+          const SizedBox(height: 10),
+          _LabeledField(
+            controller: _printerIdentifier,
+            label: settings.connectionType.identifierLabel,
+            hint: settings.connectionType.identifierHint,
+            onChanged: (v) => _updateSettings((s) => s.copyWith(printerIdentifier: v)),
+          ),
+          const SizedBox(height: 10),
+          _LabeledField(
+            controller: _receiptCopies,
+            label: 'Receipt copies',
+            hint: '1 to 10',
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            onChanged: (v) => _updateSettings(
+              (s) => s.copyWith(receiptCopies: _readCopiesOrDefault(v)),
+            ),
+          ),
           const SizedBox(height: 4),
-          const Text(
-            'Informational label only — when printing, the OS print dialog '
-            'still lets you pick any printer connected to this device.',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+          Text(
+            ref.read(receiptPrinterServiceProvider).supportsSilentDirectPrint
+                ? 'Receipts print directly to the configured printer when supported by this platform.'
+                : 'Silent direct printing is not supported in web browsers. Use desktop/mobile for direct printer output.',
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+          ),
+          const SizedBox(height: 18),
+          _SettingSwitch(
+            label: 'Automatic printing after paid sale',
+            value: settings.autoPrintEnabled,
+            onChanged: (v) => _updateSettings((s) => s.copyWith(autoPrintEnabled: v)),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: _testPrint,
+              icon: const Icon(Icons.print_rounded, size: 18),
+              label: const Text('Test Print'),
+            ),
           ),
           const SizedBox(height: 18),
 
@@ -286,6 +350,70 @@ class _ReceiptPrinterSettingsCardState extends ConsumerState<_ReceiptPrinterSett
       ),
     );
   }
+
+  int _readCopiesOrDefault(String raw) {
+    final parsed = int.tryParse(raw.trim());
+    if (parsed == null) return 1;
+    return parsed.clamp(1, 10).toInt();
+  }
+
+  Future<void> _testPrint() async {
+    final settings = ref.read(receiptSettingsProvider);
+    final receipt = ReceiptData(
+      saleId: 'test-sale',
+      receiptNumber: 'TEST-PRINT',
+      isPaid: true,
+      occurredAt: DateTime.now(),
+      cashierName: 'Test Cashier',
+      items: const [
+        CartItem(
+          product: Product(
+            id: 'test-product',
+            name: 'Test item',
+            price: 1,
+            stockQuantity: 1,
+          ),
+          quantity: 1,
+        ),
+      ],
+      subtotal: 1,
+      discountAmount: 0,
+      taxAmount: 0,
+      total: 1,
+      payments: const [
+        PaymentEntry(method: PaymentMethod.cash, amount: 1),
+      ],
+      change: 0,
+    );
+    try {
+      final bytes = await (await buildReceiptPdf(receipt, settings)).save();
+      await ref.read(receiptPrinterServiceProvider).printReceiptPdf(
+            bytes: bytes,
+            settings: settings,
+            jobName: 'test-receipt',
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Test receipt sent to printer.'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+    } on ReceiptPrintException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Test print failed. Please check printer settings.'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
+  }
 }
 
 class _SectionLabel extends StatelessWidget {
@@ -306,12 +434,16 @@ class _LabeledField extends StatelessWidget {
   final String label;
   final String? hint;
   final ValueChanged<String> onChanged;
+  final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
 
   const _LabeledField({
     required this.controller,
     required this.label,
     required this.onChanged,
     this.hint,
+    this.keyboardType,
+    this.inputFormatters,
   });
 
   @override
@@ -319,6 +451,8 @@ class _LabeledField extends StatelessWidget {
     return TextField(
       controller: controller,
       style: const TextStyle(fontSize: 13.5),
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
