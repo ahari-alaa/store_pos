@@ -1,14 +1,6 @@
 import 'package:pdf/pdf.dart';
 
 /// Paper width the receipt PDF is laid out for.
-///
-/// The app doesn't own real printer hardware/driver integration (see
-/// receipt_pdf.dart) — printing always goes through the OS print dialog via
-/// the `printing` package, which works with any printer the OS already
-/// knows about, thermal or regular. This setting only controls how wide the
-/// generated PDF page is, so a receipt printed on a narrow thermal roll
-/// doesn't waste paper and one printed on a regular printer isn't a tiny
-/// sliver on an A4 sheet.
 enum ReceiptPaperSize { mm58, mm80, a4 }
 
 extension ReceiptPaperSizeX on ReceiptPaperSize {
@@ -51,16 +43,66 @@ extension ReceiptPaperSizeX on ReceiptPaperSize {
   }
 }
 
+enum ReceiptPrinterConnectionType { system, network, bluetooth, usb }
+
+extension ReceiptPrinterConnectionTypeX on ReceiptPrinterConnectionType {
+  String get label {
+    switch (this) {
+      case ReceiptPrinterConnectionType.system:
+        return 'System printer';
+      case ReceiptPrinterConnectionType.network:
+        return 'Network printer';
+      case ReceiptPrinterConnectionType.bluetooth:
+        return 'Bluetooth printer';
+      case ReceiptPrinterConnectionType.usb:
+        return 'USB printer';
+    }
+  }
+
+  String get identifierLabel {
+    switch (this) {
+      case ReceiptPrinterConnectionType.system:
+        return 'Printer identifier';
+      case ReceiptPrinterConnectionType.network:
+        return 'Printer address';
+      case ReceiptPrinterConnectionType.bluetooth:
+        return 'Bluetooth address';
+      case ReceiptPrinterConnectionType.usb:
+        return 'USB identifier';
+    }
+  }
+
+  String get identifierHint {
+    switch (this) {
+      case ReceiptPrinterConnectionType.system:
+        return 'Optional queue id / URL from your OS';
+      case ReceiptPrinterConnectionType.network:
+        return 'Example: 192.168.1.25 or ipp://printer.local';
+      case ReceiptPrinterConnectionType.bluetooth:
+        return 'Example: AA:BB:CC:DD:EE:FF';
+      case ReceiptPrinterConnectionType.usb:
+        return 'Example: VendorId:ProductId';
+    }
+  }
+
+  static ReceiptPrinterConnectionType fromName(String? name) {
+    return ReceiptPrinterConnectionType.values.firstWhere(
+      (v) => v.name == name,
+      orElse: () => ReceiptPrinterConnectionType.system,
+    );
+  }
+}
+
 /// Persisted receipt/printer configuration, edited from the Settings screen
 /// (Receipt & Printer section) and consumed wherever a receipt PDF is built
 /// (receipt_pdf.dart) so the POS screen itself never needs printer setup.
 class ReceiptSettings {
-  /// Informational label for the printer the store uses (e.g. "Front
-  /// counter printer"). The actual OS print dialog still lets the cashier
-  /// pick any available printer — this project has no printer-discovery/
-  /// binding system, so this is intentionally just a label rather than a
-  /// device handle.
+  /// Friendly name shown in settings for the configured receipt printer.
   final String printerName;
+  final ReceiptPrinterConnectionType connectionType;
+  final String printerIdentifier;
+  final int receiptCopies;
+  final bool autoPrintEnabled;
   final ReceiptPaperSize paperSize;
   final String storeName;
   final String storeAddress;
@@ -74,6 +116,10 @@ class ReceiptSettings {
 
   const ReceiptSettings({
     this.printerName = '',
+    this.connectionType = ReceiptPrinterConnectionType.system,
+    this.printerIdentifier = '',
+    this.receiptCopies = 1,
+    this.autoPrintEnabled = false,
     this.paperSize = ReceiptPaperSize.mm80,
     this.storeName = 'Store POS',
     this.storeAddress = '',
@@ -90,6 +136,10 @@ class ReceiptSettings {
 
   ReceiptSettings copyWith({
     String? printerName,
+    ReceiptPrinterConnectionType? connectionType,
+    String? printerIdentifier,
+    int? receiptCopies,
+    bool? autoPrintEnabled,
     ReceiptPaperSize? paperSize,
     String? storeName,
     String? storeAddress,
@@ -103,6 +153,10 @@ class ReceiptSettings {
   }) {
     return ReceiptSettings(
       printerName: printerName ?? this.printerName,
+      connectionType: connectionType ?? this.connectionType,
+      printerIdentifier: printerIdentifier ?? this.printerIdentifier,
+      receiptCopies: receiptCopies ?? this.receiptCopies,
+      autoPrintEnabled: autoPrintEnabled ?? this.autoPrintEnabled,
       paperSize: paperSize ?? this.paperSize,
       storeName: storeName ?? this.storeName,
       storeAddress: storeAddress ?? this.storeAddress,
@@ -118,6 +172,10 @@ class ReceiptSettings {
 
   Map<String, dynamic> toJson() => {
         'printer_name': printerName,
+        'printer_connection_type': connectionType.name,
+        'printer_identifier': printerIdentifier,
+        'receipt_copies': receiptCopies,
+        'auto_print_enabled': autoPrintEnabled,
         'paper_size': paperSize.name,
         'store_name': storeName,
         'store_address': storeAddress,
@@ -136,6 +194,14 @@ class ReceiptSettings {
     const d = ReceiptSettings.defaults;
     return ReceiptSettings(
       printerName: json['printer_name'] as String? ?? d.printerName,
+      connectionType: ReceiptPrinterConnectionTypeX.fromName(
+        json['printer_connection_type'] as String?,
+      ),
+      printerIdentifier: json['printer_identifier'] as String? ?? d.printerIdentifier,
+      receiptCopies: (json['receipt_copies'] is int)
+          ? (json['receipt_copies'] as int).clamp(1, 10).toInt()
+          : d.receiptCopies,
+      autoPrintEnabled: json['auto_print_enabled'] as bool? ?? d.autoPrintEnabled,
       paperSize: ReceiptPaperSizeX.fromName(json['paper_size'] as String?),
       storeName: json['store_name'] as String? ?? d.storeName,
       storeAddress: json['store_address'] as String? ?? d.storeAddress,

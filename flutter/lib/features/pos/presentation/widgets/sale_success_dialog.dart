@@ -1,19 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:printing/printing.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../settings/presentation/providers/receipt_settings_provider.dart';
 import '../providers/receipt_data.dart';
+import '../utils/receipt_printer_service.dart';
 import '../utils/receipt_pdf.dart';
 
-/// Shown once a sale is completed. Offers a PDF receipt preview (with
-/// print/share built in via receipt_preview_page.dart) plus a direct
-/// Share button, built from a [ReceiptData] snapshot taken right before
-/// the cart was cleared. [receipt.isPaid] is always true here — this
-/// dialog only ever shows after a real payment was recorded.
+/// Shown once a sale is completed. Offers direct receipt printing and
+/// sharing, built from a [ReceiptData] snapshot taken right before the
+/// cart was cleared. [receipt.isPaid] is always true here — this dialog
+/// only ever shows after a real payment was recorded.
 class SaleSuccessDialog extends ConsumerWidget {
   final double total;
   final double change;
@@ -36,6 +35,38 @@ class SaleSuccessDialog extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Unable to share the receipt. Please try again.'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
+  }
+
+  Future<void> _printReceipt(BuildContext context, WidgetRef ref) async {
+    try {
+      final settings = ref.read(receiptSettingsProvider);
+      final bytes = await (await buildReceiptPdf(receipt, settings)).save();
+      await ref.read(receiptPrinterServiceProvider).printReceiptPdf(
+            bytes: bytes,
+            settings: settings,
+            jobName: 'receipt-${receipt.receiptNumber}',
+          );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Receipt printed successfully.'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+    } on ReceiptPrintException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Printer unavailable. Please try again.'),
           backgroundColor: AppColors.danger,
         ),
       );
@@ -79,15 +110,7 @@ class SaleSuccessDialog extends ConsumerWidget {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () {
-                      // Close this dialog first, then route through
-                      // go_router — pushing the preview imperatively on
-                      // top of an already-imperative dialog route is what
-                      // used to corrupt the navigator on a mid-session
-                      // logout/redirect (see app_router.dart).
-                      Navigator.of(context).pop();
-                      context.push('/receipt-preview', extra: receipt);
-                    },
+                    onPressed: () => _printReceipt(context, ref),
                     icon: const Icon(Icons.print_outlined, size: 18),
                     label: const Text('Print receipt'),
                   ),
